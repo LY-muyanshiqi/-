@@ -110,7 +110,7 @@ TIMEZONE = "Asia/Shanghai"
 PREDICTION_COMPANIES = ["A公司", "B公司", "C公司"]  # A公司, B公司, C公司
 DEFAULT_FORECAST_DAYS_LIMIT = 31
 DEFAULT_KNN_K = 5
-DEFAULT_PRODUCTION_DAYS = [0, 1, 2, 3, 4]
+DEFAULT_PRODUCTION_DAYS = [(0, "周一"), (1, "周二"), (2, "周三"), (3, "周四"), (4, "周五")]
 
 DAY_TYPE_MAP = {
     "production": {"label": "生产日", "weight": 1.0},

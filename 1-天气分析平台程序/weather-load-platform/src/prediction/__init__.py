@@ -9,7 +9,7 @@ DAY_TYPE_MAP = {
     "holiday": {"label": "节假日", "weight": 0.4},
 }
 
-DEFAULT_PRODUCTION_DAYS = [0, 1, 2, 3, 4]  # 周一至周五
+DEFAULT_PRODUCTION_DAYS = [(0, "周一"), (1, "周二"), (2, "周三"), (3, "周四"), (4, "周五")]
 
 DEFAULT_KNN_K = 5
 DEFAULT_FORECAST_HORIZON = 31
