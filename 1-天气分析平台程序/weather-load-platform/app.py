@@ -1174,38 +1174,59 @@ with tab5:
                 st.caption(f"当前排班: {len(existing_cal)} 天")
 
         with col_wx:
-            from io import BytesIO
-            template_buffer = BytesIO()
-            wx_template = pd.DataFrame({
-                "date": pd.date_range(datetime.now(), periods=31, freq="D").strftime("%Y-%m-%d"),
-                "tmax": [32.0] * 31, "tmin": [25.0] * 31,
-                "humidity_avg": [75.0] * 31, "precip_sum": [0.0] * 31, "rad_sum": [5000.0] * 31,
-            })
-            wx_template.loc[5:7, ["precip_sum", "rad_sum"]] = [15.0, 2000.0]
-            with pd.ExcelWriter(template_buffer, engine="openpyxl") as w:
-                wx_template.to_excel(w, sheet_name="天气预报", index=False)
-            template_buffer.seek(0)
-            st.download_button(
-                "📥 下载天气模板", data=template_buffer,
-                file_name="天气预报模板.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            st.caption("在表格中直接填写天气预报数据：")
+            wx_has = False
+            if "weather_editor_df" not in st.session_state:
+                dates = pd.date_range(datetime.now(), periods=7, freq="D")
+                st.session_state.weather_editor_df = pd.DataFrame({
+                    "date": dates.strftime("%Y-%m-%d"),
+                    "tmax": [32.0] * 7,
+                    "tmin": [25.0] * 7,
+                    "humidity_avg": [75.0] * 7,
+                    "precip_sum": [0.0] * 7,
+                    "rad_sum": [5000.0] * 7,
+                })
+            wx_days = st.slider("预报天数", 1, 31, 7, 1, key="wx_days")
+            current_df = st.session_state.weather_editor_df
+            if len(current_df) < wx_days:
+                extra = wx_days - len(current_df)
+                last_date = pd.Timestamp(current_df["date"].iloc[-1])
+                new_rows = pd.DataFrame({
+                    "date": pd.date_range(last_date + pd.Timedelta(days=1), periods=extra, freq="D").strftime("%Y-%m-%d"),
+                    "tmax": [current_df["tmax"].iloc[-1]] * extra,
+                    "tmin": [current_df["tmin"].iloc[-1]] * extra,
+                    "humidity_avg": [current_df["humidity_avg"].iloc[-1]] * extra,
+                    "precip_sum": [0.0] * extra,
+                    "rad_sum": [current_df["rad_sum"].iloc[-1]] * extra,
+                })
+                current_df = pd.concat([current_df, new_rows], ignore_index=True)
+            elif len(current_df) > wx_days:
+                current_df = current_df.head(wx_days)
+
+            edited = st.data_editor(
+                current_df,
+                column_config={
+                    "date": st.column_config.TextColumn("日期", disabled=True),
+                    "tmax": st.column_config.NumberColumn("最高温 °C", min_value=-20.0, max_value=50.0, step=0.5, format="%.1f"),
+                    "tmin": st.column_config.NumberColumn("最低温 °C", min_value=-20.0, max_value=50.0, step=0.5, format="%.1f"),
+                    "humidity_avg": st.column_config.NumberColumn("湿度 %", min_value=0.0, max_value=100.0, step=1.0, format="%.0f"),
+                    "precip_sum": st.column_config.NumberColumn("降水 mm", min_value=0.0, max_value=500.0, step=1.0, format="%.1f"),
+                    "rad_sum": st.column_config.NumberColumn("辐射 W/m²·d", min_value=0.0, max_value=15000.0, step=100.0, format="%.0f"),
+                },
                 use_container_width=True,
+                num_rows="fixed",
+                height=250,
+                key="weather_editor",
             )
-            st.caption("填完后上传：")
-            uploaded_wx = st.file_uploader(
-                "上传天气预报", type=["csv", "xlsx", "xls"],
-                key="wx_forecast_uploader", label_visibility="collapsed",
-            )
-            if uploaded_wx is not None:
-                wx_raw = pd.read_csv(uploaded_wx) if uploaded_wx.name.endswith(".csv") else pd.read_excel(uploaded_wx)
-                wx_df = parse_weather_forecast_upload(wx_raw)
-                if wx_df is None or wx_df.empty:
-                    st.error("无法解析天气预报")
-                else:
-                    st.session_state.weather_forecast_df = wx_df
-                    st.success(f"✅ 已加载 {len(wx_df)} 天天气预报")
+            st.session_state.weather_editor_df = edited
+
+            if st.button("✅ 确认天气数据", use_container_width=True, key="confirm_wx"):
+                st.session_state.weather_forecast_df = edited.rename(columns={"date": "date"})
+                st.success(f"✅ 已保存 {len(edited)} 天天气预报")
+                st.rerun()
+
             wx_has = st.session_state.weather_forecast_df is not None and not st.session_state.weather_forecast_df.empty
-            st.caption(f"当前预报: {len(st.session_state.weather_forecast_df)} 天" if wx_has else "不上传则无天气修正")
+            st.caption(f"已保存: {len(st.session_state.weather_forecast_df)} 天" if wx_has else "✏️ 填完点「确认天气数据」即可生效")
 
     # ---- 预测参数 + 运行 ----
     col_p1, col_p2, col_p3 = st.columns([1, 1, 2])
