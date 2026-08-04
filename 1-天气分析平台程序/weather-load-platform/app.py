@@ -1042,47 +1042,40 @@ with tab5:
     st.subheader("🔌 污水厂负荷预测")
     st.caption("基于历史负荷 + 排班日历 + 天气预报，预测未来逐时负荷")
 
-    # ---- 数据配置区（紧凑布局） ----
-    col_c1, col_c2, col_c3 = st.columns([2, 3, 1])
-    with col_c1:
-        pred_company = st.selectbox(
-            "选择公司",
-            options=PREDICTION_COMPANIES,
-            key="pred_company_select",
-        )
-    with col_c2:
+    # ---- 顶部操作栏 ----
+    c1, c2, c3, c4 = st.columns([2, 2, 1, 1])
+    with c1:
+        pred_company = st.selectbox("选择公司", options=PREDICTION_COMPANIES, key="pred_company_select")
+    with c2:
         load_has = has_load_data(pred_company)
         load_start, load_end = query_load_date_range(pred_company)
         if load_has:
-            st.success(f"✅ {pred_company} 有数据: {load_start} ~ {load_end}")
+            st.success(f"✅ {pred_company}: {load_start} ~ {load_end}")
         else:
-            st.info(f"💡 {pred_company} 暂无历史负荷数据，请在右侧导入")
-
-    if load_has:
-        col_b1, col_b2 = st.columns([3, 1])
-        with col_b2:
+            st.info(f"💡 {pred_company} 暂无数据")
+    with c3:
+        st.write("")
+        st.write("")
+        if st.button("📂 导入数据", use_container_width=True, key="toggle_import"):
+            st.session_state._show_import = not st.session_state.get("_show_import", False)
+    with c4:
+        if load_has:
+            st.write("")
+            st.write("")
             st.download_button(
-                label=f"📥 导出 {pred_company} 逐时数据",
-                data=_build_hourly_export(pred_company),
+                label="📥 导出", data=_build_hourly_export(pred_company),
                 file_name=f"{pred_company}_逐时负荷_{datetime.now().strftime('%Y%m%d')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
             )
-    with col_c3:
-        st.write("")
-        if st.button("📂 导入数据", use_container_width=True, key="toggle_import"):
-            st.session_state._show_import = not st.session_state.get("_show_import", False)
 
+    # ---- 导入面板 ----
     if st.session_state.get("_show_import", False) or not load_has:
         with st.expander("📂 数据导入", expanded=not load_has):
-            st.caption("支持: Excel (.xlsx) / CSV 宽表(日期+24时) / CSV 长表(datetime+load_mw)")
-
             uploaded_load = st.file_uploader(
-                f"上传 {pred_company} 负荷文件",
-                type=["csv", "xlsx", "xls"],
+                f"上传 {pred_company} 负荷文件 (Excel/CSV)", type=["csv", "xlsx", "xls"],
                 key="pred_load_uploader",
             )
-
             if uploaded_load is not None:
                 from src.utils.csv_parser import parse_load_history_upload
                 file_bytes = uploaded_load.getvalue()
@@ -1091,24 +1084,22 @@ with tab5:
                     st.error(error_msg)
                 elif load_hist_df is not None and not load_hist_df.empty:
                     load_hist_df["company"] = pred_company
-                    n_imported = import_load_from_df(load_hist_df, uploaded_load.name, pred_company)
-                    st.success(f"✅ 已导入 {pred_company} {n_imported} 条负荷记录")
+                    n = import_load_from_df(load_hist_df, uploaded_load.name, pred_company)
+                    st.success(f"✅ 已导入 {pred_company} {n} 条负荷记录")
                     st.session_state._show_import = False
                     st.rerun()
 
-            # 批量导入三家公司
             st.divider()
             st.caption("或分别上传各公司数据：")
             batch_cols = st.columns(3)
             for i, company in enumerate(PREDICTION_COMPANIES):
                 with batch_cols[i]:
                     co_has = has_load_data(company)
-                    co_start, co_end = query_load_date_range(company) if co_has else (None, None)
-                    st.caption(f"{'✅' if co_has else '⬜'} {company}" + (f": {co_start}~{co_end}" if co_has else " 无数据"))
+                    icon = "✅" if co_has else "⬜"
+                    st.caption(f"{icon} {company}")
                     co_file = st.file_uploader(
                         company, type=["csv", "xlsx", "xls"],
-                        key=f"batch_load_{company}",
-                        label_visibility="collapsed",
+                        key=f"batch_load_{company}", label_visibility="collapsed",
                     )
                     if co_file is not None:
                         co_bytes = co_file.getvalue()
@@ -1125,9 +1116,9 @@ with tab5:
             st.info("👆 请先导入历史负荷数据")
             st.stop()
 
+    # ---- 排班 + 天气 ----
     existing_cal = get_calendar(pred_company)
-    cal_has_data = not existing_cal.empty
-    if cal_has_data:
+    if not existing_cal.empty:
         st.session_state.calendar_df = existing_cal
 
     with st.expander("📅 排班日历 + 🌤️ 天气预报", expanded=False):
@@ -1144,12 +1135,12 @@ with tab5:
                     options=[(0, "周一"), (1, "周二"), (2, "周三"), (3, "周四"), (4, "周五"), (5, "周六"), (6, "周日")],
                     default=DEFAULT_PRODUCTION_DAYS, format_func=lambda x: x[1], key="prod_days_select",
                 )
-                prod_day_nums = [d[0] for d in prod_days]
                 special_dates_input = st.text_area(
-                    "特殊日（YYYY-MM-DD,类型）",
-                    placeholder="2026-07-01,holiday", height=80, key="special_dates_input",
+                    "特殊日（YYYY-MM-DD,类型）", placeholder="2026-10-01,holiday",
+                    height=68, key="special_dates_input",
                 )
                 if st.button("🔄 生成排班日历", key="gen_calendar"):
+                    prod_day_nums = [d[0] for d in prod_days]
                     special_dates = {}
                     if special_dates_input.strip():
                         for line in special_dates_input.strip().split("\n"):
@@ -1158,7 +1149,6 @@ with tab5:
                                 special_dates[parts[0]] = parts[1]
                     if load_start and load_end:
                         cal_df = generate_calendar_from_rule(load_start, load_end, prod_day_nums, special_dates)
-                        from datetime import datetime, timedelta
                         forecast_end_dt = datetime.strptime(load_end, "%Y-%m-%d") + timedelta(days=DEFAULT_FORECAST_DAYS_LIMIT)
                         cal_ext = generate_calendar_from_rule(load_end, forecast_end_dt.strftime("%Y-%m-%d"), prod_day_nums, special_dates)
                         cal_df = pd.concat([cal_df, cal_ext[cal_ext["date"] > cal_df["date"].max()]], ignore_index=True)
@@ -1180,40 +1170,31 @@ with tab5:
                         st.session_state.calendar_df = cal_df
                         st.success(f"✅ 已导入 {len(cal_df)} 天排班数据")
                         st.rerun()
-            if cal_has_data:
+            if not existing_cal.empty:
                 st.caption(f"当前排班: {len(existing_cal)} 天")
 
         with col_wx:
-            # 模板下载
             from io import BytesIO
             template_buffer = BytesIO()
             wx_template = pd.DataFrame({
-                "date": pd.date_range(
-                    datetime.now(), periods=31, freq="D"
-                ).strftime("%Y-%m-%d"),
-                "tmax": [32.0] * 31,
-                "tmin": [25.0] * 31,
-                "humidity_avg": [75.0] * 31,
-                "precip_sum": [0.0] * 31,
-                "rad_sum": [5000.0] * 31,
+                "date": pd.date_range(datetime.now(), periods=31, freq="D").strftime("%Y-%m-%d"),
+                "tmax": [32.0] * 31, "tmin": [25.0] * 31,
+                "humidity_avg": [75.0] * 31, "precip_sum": [0.0] * 31, "rad_sum": [5000.0] * 31,
             })
-            wx_template.loc[5:7, "precip_sum"] = 15.0
-            wx_template.loc[5:7, "rad_sum"] = 2000.0
-            with pd.ExcelWriter(template_buffer, engine="openpyxl") as writer:
-                wx_template.to_excel(writer, sheet_name="天气预报", index=False)
+            wx_template.loc[5:7, ["precip_sum", "rad_sum"]] = [15.0, 2000.0]
+            with pd.ExcelWriter(template_buffer, engine="openpyxl") as w:
+                wx_template.to_excel(w, sheet_name="天气预报", index=False)
             template_buffer.seek(0)
             st.download_button(
-                label="📥 下载天气模板",
-                data=template_buffer,
+                "📥 下载天气模板", data=template_buffer,
                 file_name="天气预报模板.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
             )
-
-            st.caption("填完模板后在此上传：")
+            st.caption("填完后上传：")
             uploaded_wx = st.file_uploader(
-                "上传天气预报 (Excel/CSV)", type=["csv", "xlsx", "xls"], key="wx_forecast_uploader",
-                label_visibility="collapsed",
+                "上传天气预报", type=["csv", "xlsx", "xls"],
+                key="wx_forecast_uploader", label_visibility="collapsed",
             )
             if uploaded_wx is not None:
                 wx_raw = pd.read_csv(uploaded_wx) if uploaded_wx.name.endswith(".csv") else pd.read_excel(uploaded_wx)
@@ -1223,10 +1204,8 @@ with tab5:
                 else:
                     st.session_state.weather_forecast_df = wx_df
                     st.success(f"✅ 已加载 {len(wx_df)} 天天气预报")
-            if st.session_state.weather_forecast_df is not None and not st.session_state.weather_forecast_df.empty:
-                st.caption(f"当前预报: {len(st.session_state.weather_forecast_df)} 天")
-            else:
-                st.caption("不上传则无天气修正")
+            wx_has = st.session_state.weather_forecast_df is not None and not st.session_state.weather_forecast_df.empty
+            st.caption(f"当前预报: {len(st.session_state.weather_forecast_df)} 天" if wx_has else "不上传则无天气修正")
 
     # ---- 预测参数 + 运行 ----
     col_p1, col_p2, col_p3 = st.columns([1, 1, 2])
@@ -1237,14 +1216,13 @@ with tab5:
     with col_p3:
         st.write("")
         if st.button("🚀 运行预测", type="primary", use_container_width=True, key="run_forecast_btn"):
-            with st.spinner(f"正在预测 {pred_company} 未来 {forecast_horizon} 天负荷..."):
+            with st.spinner(f"预测 {pred_company} 未来 {forecast_horizon} 天..."):
                 df_load = query_load_all(pred_company)
                 df_hourly = prepare_load_data(df_load, pred_company)
                 cal_df = st.session_state.calendar_df
                 wx_df = st.session_state.weather_forecast_df
                 result = run_forecast(
-                    company=pred_company,
-                    df_hourly=df_hourly,
+                    company=pred_company, df_hourly=df_hourly,
                     forecast_horizon=forecast_horizon,
                     calendar_df=cal_df if cal_df is not None and not cal_df.empty else None,
                     weather_df=wx_df if wx_df is not None and not wx_df.empty else None,
@@ -1257,7 +1235,7 @@ with tab5:
 
     st.divider()
 
-    # ---- Step 5: 预测结果 ----
+    # ---- 预测结果 ----
     result = st.session_state.prediction_result
     if result is not None and st.session_state.prediction_company == pred_company:
         if "error" in result:
@@ -1269,12 +1247,12 @@ with tab5:
             df_hourly = prepare_load_data(df_load, pred_company)
             daily_series = prepare_daily_series(df_hourly)
 
-            st.markdown("### 📊 预测结果")
-
             forecast = result["daily_forecast"]
             hourly_df = pd.DataFrame(result["hourly_results"])
+            info = result.get("info", {})
+            cal_df = st.session_state.calendar_df
 
-            # 回测验证：预测最后30天 vs 实际
+            # 回测 MAPE
             hist_dates = set(str(d) for d in daily_series.index)
             overlap = hourly_df[hourly_df["date"].apply(lambda d: str(d) in hist_dates)]
             mape_val = None
@@ -1282,57 +1260,45 @@ with tab5:
                 daily_pred = overlap.groupby("date")["load_mw"].sum()
                 daily_actual = {}
                 for d in daily_pred.index:
-                    d_str = str(d) if hasattr(d, "strftime") else d
-                    if d_str in hist_dates or pd.Timestamp(d).strftime("%Y-%m-%d") in hist_dates:
-                        key = pd.Timestamp(d).strftime("%Y-%m-%d")
-                        if key in daily_series.index:
-                            daily_actual[d] = daily_series[key]
+                    key = pd.Timestamp(d).strftime("%Y-%m-%d")
+                    if key in daily_series.index:
+                        daily_actual[d] = daily_series[key]
                 if daily_actual:
-                    actual_vals = np.array(list(daily_actual.values()))
-                    pred_vals = np.array([daily_pred[d] for d in daily_actual.keys()])
-                    mape_val = float(np.mean(np.abs((actual_vals - pred_vals) / (actual_vals + 1e-6))) * 100)
-                    mae_val = float(np.mean(np.abs(actual_vals - pred_vals)))
+                    a = np.array(list(daily_actual.values()))
+                    p = np.array([daily_pred[d] for d in daily_actual.keys()])
+                    mape_val = float(np.mean(np.abs((a - p) / (a + 1e-6))) * 100)
 
-            info = result.get("info", {})
-            cols_metrics = []
-            cols_metrics.append(("预测日均负荷", f"{forecast.mean():.1f} MWh"))
-            cols_metrics.append(("历史日均负荷", f"{daily_series.mean():.1f} MWh"))
-            cols_metrics.append(("最优回看窗口", f"{info.get('best_window', '-')} 天"))
+            # KPI 卡片
+            metrics = [
+                ("预测日均", f"{forecast.mean():.1f} MWh"),
+                ("历史日均", f"{daily_series.mean():.1f} MWh"),
+                ("最优窗口", f"{info.get('best_window', '-')} 天"),
+            ]
             if mape_val is not None:
-                cols_metrics.append((
-                    "回测 MAPE",
-                    f"{mape_val:.1f}%",
-                    "normal" if mape_val < 10 else "off" if mape_val < 20 else "inverse"
-                ))
+                delta = "normal" if mape_val < 10 else "off" if mape_val < 20 else "inverse"
+                metrics.append((f"回测 MAPE", f"{mape_val:.1f}%"))
             else:
-                cols_metrics.append(("回测残差 σ", f"{info.get('residual_std', '-'):.1f} MWh" if isinstance(info.get('residual_std'), (int, float)) else "-"))
+                rs = info.get('residual_std')
+                metrics.append(("回测残差", f"{rs:.1f} MWh" if isinstance(rs, (int, float)) else "-"))
 
-            metric_cols = st.columns(len(cols_metrics))
-            for i, (label, value, *rest) in enumerate(cols_metrics):
-                with metric_cols[i]:
-                    delta_color = rest[0] if rest else "normal"
+            mcols = st.columns(len(metrics))
+            for i, (label, value) in enumerate(metrics):
+                with mcols[i]:
                     st.metric(label, value)
 
-            cal_df = st.session_state.calendar_df
-
+            # 图表
             st.plotly_chart(
                 plot_daily_forecast(daily_series, forecast, result["daily_lower"], result["daily_upper"], pred_company),
                 use_container_width=True,
             )
 
-            col_c1, col_c2 = st.columns(2)
-            with col_c1:
+            c_l, c_r = st.columns(2)
+            with c_l:
+                st.plotly_chart(plot_hourly_profile(result["hourly_results"], company=pred_company), use_container_width=True)
+            with c_r:
                 st.plotly_chart(
-                    plot_hourly_profile(result["hourly_results"], company=pred_company),
-                    use_container_width=True,
-                )
-            with col_c2:
-                st.plotly_chart(
-                    plot_weekday_vs_rest(
-                        result["hourly_results"],
-                        cal_df if cal_df is not None and not cal_df.empty else None,
-                        pred_company,
-                    ),
+                    plot_weekday_vs_rest(result["hourly_results"],
+                        cal_df if cal_df is not None and not cal_df.empty else None, pred_company),
                     use_container_width=True,
                 )
 
@@ -1341,37 +1307,29 @@ with tab5:
                 use_container_width=True,
             )
 
-            # 数据表格
-            st.subheader("📋 预测数据")
-            hourly_df = pd.DataFrame(result["hourly_results"])
+            # 数据表 + 导出
             daily_report = hourly_df.groupby("date").agg(
-                日均负荷_MW=("load_mw", "mean"),
-                日峰荷_MW=("load_mw", "max"),
-                日谷荷_MW=("load_mw", "min"),
-                日总用电量_MWh=("load_mw", "sum"),
+                日均负荷_MW=("load_mw", "mean"), 日峰荷_MW=("load_mw", "max"),
+                日谷荷_MW=("load_mw", "min"), 日总用电量_MWh=("load_mw", "sum"),
                 峰谷差_MW=("load_mw", lambda x: x.max() - x.min()),
             ).reset_index()
             daily_report.columns = ["日期", "日均负荷_MW", "日峰荷_MW", "日谷荷_MW", "日总用电量_MWh", "峰谷差_MW"]
             daily_report["日期"] = daily_report["日期"].astype(str)
-            st.dataframe(daily_report, use_container_width=True, height=300, hide_index=True)
 
-            # 导出
-            st.subheader("📥 导出预测结果")
-            from io import BytesIO
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                daily_report.to_excel(writer, sheet_name="日汇总", index=False)
-                hourly_df[["datetime", "load_mw", "daily_total_mwh", "profile_std_mw"]].to_excel(
-                    writer, sheet_name="逐时数据", index=False
+            with st.expander("📋 预测数据表 + 导出", expanded=False):
+                st.dataframe(daily_report, use_container_width=True, height=250, hide_index=True)
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                    daily_report.to_excel(writer, sheet_name="日汇总", index=False)
+                    hourly_df[["datetime", "load_mw", "daily_total_mwh", "profile_std_mw"]].to_excel(
+                        writer, sheet_name="逐时数据", index=False)
+                output.seek(0)
+                st.download_button(
+                    f"⬇️ 下载 {pred_company} 预测 Excel", data=output,
+                    file_name=f"{pred_company}_负荷预测_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
                 )
-            output.seek(0)
-            st.download_button(
-                label=f"⬇️ 下载 {pred_company} 预测 Excel",
-                data=output,
-                file_name=f"{pred_company}_负荷预测_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            )
 
 # ============================================================
 # 自动刷新逻辑
