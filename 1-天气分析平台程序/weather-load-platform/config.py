@@ -121,6 +121,17 @@ DAY_TYPE_MAP = {
 WEATHER_CORRECTION_WINDOWS = [14, 21, 28, 42, 56]
 REG_STRENGTHS = [0.0, 0.2, 0.4, 0.6]
 
+WEATHER_CORRECTION_PARAMS = {
+    "hot_temp_threshold": 35,
+    "hot_temp_factor": 1.03,
+    "cold_temp_threshold": 5,
+    "cold_temp_factor": 1.02,
+    "heavy_rain_threshold": 10,
+    "heavy_rain_factor": 0.98,
+    "solar_max_reduction": 0.05,
+    "solar_reference_rad": 5000.0,
+}
+
 # ============================================================
 # 相似日因子权重（基于395天工业负荷相关性分析标定）
 # 数据: Tmin r=0.694 > Tmax r=0.569 > 露点 r=0.673 > 季节(秋0.76/冬-0.23) > 降水

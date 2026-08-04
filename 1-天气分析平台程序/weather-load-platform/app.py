@@ -1023,213 +1023,130 @@ with tab5:
     st.subheader("🔌 污水厂负荷预测")
     st.caption("基于历史负荷 + 排班日历 + 天气预报，预测未来逐时负荷")
 
-    # ---- Step 1: 选择公司 + 上传历史负荷 ----
-    st.markdown("### 📤 Step 1: 历史负荷数据")
-
-    col_comp, col_info = st.columns([1, 2])
-    with col_comp:
+    # ---- 数据配置区（紧凑布局） ----
+    col_c1, col_c2 = st.columns([1, 3])
+    with col_c1:
         pred_company = st.selectbox(
             "选择公司",
             options=PREDICTION_COMPANIES,
             key="pred_company_select",
         )
-
-    load_has = has_load_data(pred_company)
-    load_start, load_end = query_load_date_range(pred_company)
-
-    with col_info:
+    with col_c2:
+        load_has = has_load_data(pred_company)
+        load_start, load_end = query_load_date_range(pred_company)
         if load_has:
             st.success(f"✅ {pred_company} 已有数据: {load_start} ~ {load_end}")
         else:
             st.info(f"💡 {pred_company} 暂无历史负荷数据，请上传")
 
-    upload_col1, upload_col2 = st.columns(2)
-    with upload_col1:
+    if not load_has:
         uploaded_load = st.file_uploader(
             f"上传 {pred_company} 历史负荷文件",
             type=["csv", "xlsx", "xls"],
             key="pred_load_uploader",
         )
-    with upload_col2:
-        st.caption("支持格式: Excel (.xlsx) / CSV 宽表 / CSV 长表")
-        st.caption("宽表: 日期列 + 24列逐时负荷")
-        st.caption("长表: datetime + load_mw")
-
-    if uploaded_load is not None:
-        from src.utils.csv_parser import parse_load_history_upload
-
-        file_bytes = uploaded_load.getvalue()
-        load_hist_df, error_msg = parse_load_history_upload(file_bytes, uploaded_load.name)
-        if error_msg:
-            st.error(error_msg)
-        elif load_hist_df is not None and not load_hist_df.empty:
-            load_hist_df["company"] = pred_company
-            n_imported = import_load_from_df(load_hist_df, uploaded_load.name, pred_company)
-            st.success(f"✅ 已导入 {pred_company} {n_imported} 条负荷记录")
-            st.rerun()
-
-    if not load_has:
-        st.info("👆 请先上传历史负荷数据")
+        if uploaded_load is not None:
+            from src.utils.csv_parser import parse_load_history_upload
+            file_bytes = uploaded_load.getvalue()
+            load_hist_df, error_msg = parse_load_history_upload(file_bytes, uploaded_load.name)
+            if error_msg:
+                st.error(error_msg)
+            elif load_hist_df is not None and not load_hist_df.empty:
+                load_hist_df["company"] = pred_company
+                import_load_from_df(load_hist_df, uploaded_load.name, pred_company)
+                st.success(f"✅ 已导入 {pred_company} {len(load_hist_df)} 条负荷记录")
+                st.rerun()
         st.stop()
-
-    st.divider()
-
-    # ---- Step 2: 排班计划 ----
-    st.markdown("### 📅 Step 2: 排班计划")
 
     existing_cal = get_calendar(pred_company)
     cal_has_data = not existing_cal.empty
-
-    cal_mode = st.radio(
-        "排班模式",
-        options=["weekly_rule", "upload"],
-        format_func=lambda x: "周规律 + 特殊日" if x == "weekly_rule" else "上传完整排班表",
-        horizontal=True,
-        key="cal_mode",
-    )
-
-    if cal_mode == "weekly_rule":
-        col_days, col_special = st.columns(2)
-        with col_days:
-            prod_days = st.multiselect(
-                "每周生产日",
-                options=[(0, "周一"), (1, "周二"), (2, "周三"), (3, "周四"), (4, "周五"), (5, "周六"), (6, "周日")],
-                default=DEFAULT_PRODUCTION_DAYS,
-                format_func=lambda x: x[1],
-                key="prod_days_select",
-            )
-            prod_day_nums = [d[0] for d in prod_days]
-        with col_special:
-            special_dates_input = st.text_area(
-                "特殊日（每行一个: YYYY-MM-DD,类型）",
-                placeholder="2026-07-01,holiday\n2026-07-05,rest",
-                height=100,
-                key="special_dates_input",
-                help="类型: production=生产日, rest=休息日, holiday=节假日",
-            )
-
-        if st.button("🔄 生成排班日历", key="gen_calendar", use_container_width=True):
-            special_dates = {}
-            if special_dates_input.strip():
-                for line in special_dates_input.strip().split("\n"):
-                    parts = [p.strip() for p in line.split(",")]
-                    if len(parts) >= 2:
-                        special_dates[parts[0]] = parts[1]
-
-            if load_start and load_end:
-                cal_df = generate_calendar_from_rule(
-                    load_start, load_end, prod_day_nums, special_dates
-                )
-                # 扩展到预测范围
-                from datetime import datetime, timedelta
-                forecast_end_dt = datetime.strptime(load_end, "%Y-%m-%d") + timedelta(days=DEFAULT_FORECAST_DAYS_LIMIT)
-                cal_extended = generate_calendar_from_rule(
-                    load_end, forecast_end_dt.strftime("%Y-%m-%d"), prod_day_nums, special_dates
-                )
-                cal_df = pd.concat([cal_df, cal_extended[cal_extended["date"] > cal_df["date"].max()]], ignore_index=True)
-
-                delete_calendar(pred_company)
-                import_calendar_from_df(cal_df, pred_company, "weekly_rule")
-                st.session_state.calendar_df = cal_df
-                st.success(f"✅ 已生成 {len(cal_df)} 天排班日历")
-                st.rerun()
-
-    else:
-        uploaded_cal = st.file_uploader(
-            "上传排班表 (CSV/Excel: 日期 + 类型)",
-            type=["csv", "xlsx", "xls"],
-            key="cal_uploader",
-        )
-        if uploaded_cal is not None:
-            try:
-                if uploaded_cal.name.endswith(".csv"):
-                    cal_raw = pd.read_csv(uploaded_cal)
-                else:
-                    cal_raw = pd.read_excel(uploaded_cal)
-                cal_df = parse_calendar_upload(cal_raw)
-                if cal_df.empty:
-                    st.error("无法解析排班表，请检查格式。需包含日期列 + 类型列。")
-                else:
-                    delete_calendar(pred_company)
-                    import_calendar_from_df(cal_df, pred_company, "upload")
-                    st.session_state.calendar_df = cal_df
-                    st.success(f"✅ 已导入 {len(cal_df)} 天排班数据")
-                    st.rerun()
-            except Exception as e:
-                st.error(f"文件读取失败: {e}")
-
-    st.session_state.calendar_df = existing_cal
-
     if cal_has_data:
-        with st.expander(f"📋 当前排班 ({len(existing_cal)} 天)", expanded=False):
-            display_cal = existing_cal.copy()
-            display_cal["日期类型"] = display_cal["day_type"].map(
-                lambda x: DAY_TYPE_MAP.get(x, {}).get("label", x)
+        st.session_state.calendar_df = existing_cal
+
+    with st.expander("📅 排班日历 + 🌤️ 天气预报", expanded=False):
+        col_cal, col_wx = st.columns(2)
+        with col_cal:
+            cal_mode = st.radio(
+                "排班模式", options=["weekly_rule", "upload"],
+                format_func=lambda x: "周规律" if x == "weekly_rule" else "上传排班表",
+                horizontal=True, key="cal_mode",
             )
-            st.dataframe(display_cal[["date", "日期类型", "day_type_weight"]], use_container_width=True, hide_index=True)
-
-    st.divider()
-
-    # ---- Step 3: 天气预报 ----
-    st.markdown("### 🌤️ Step 3: 天气预报（可选）")
-
-    uploaded_wx = st.file_uploader(
-        "上传目标日天气预报 (CSV/Excel: 日期 + 最高温 + 最低温 + 湿度 + 降水 + 辐射)",
-        type=["csv", "xlsx", "xls"],
-        key="wx_forecast_uploader",
-    )
-    if uploaded_wx is not None:
-        try:
-            if uploaded_wx.name.endswith(".csv"):
-                wx_raw = pd.read_csv(uploaded_wx)
+            if cal_mode == "weekly_rule":
+                prod_days = st.multiselect(
+                    "每周生产日",
+                    options=[(0, "周一"), (1, "周二"), (2, "周三"), (3, "周四"), (4, "周五"), (5, "周六"), (6, "周日")],
+                    default=DEFAULT_PRODUCTION_DAYS, format_func=lambda x: x[1], key="prod_days_select",
+                )
+                prod_day_nums = [d[0] for d in prod_days]
+                special_dates_input = st.text_area(
+                    "特殊日（YYYY-MM-DD,类型）",
+                    placeholder="2026-07-01,holiday", height=80, key="special_dates_input",
+                )
+                if st.button("🔄 生成排班日历", key="gen_calendar"):
+                    special_dates = {}
+                    if special_dates_input.strip():
+                        for line in special_dates_input.strip().split("\n"):
+                            parts = [p.strip() for p in line.split(",")]
+                            if len(parts) >= 2:
+                                special_dates[parts[0]] = parts[1]
+                    if load_start and load_end:
+                        cal_df = generate_calendar_from_rule(load_start, load_end, prod_day_nums, special_dates)
+                        from datetime import datetime, timedelta
+                        forecast_end_dt = datetime.strptime(load_end, "%Y-%m-%d") + timedelta(days=DEFAULT_FORECAST_DAYS_LIMIT)
+                        cal_ext = generate_calendar_from_rule(load_end, forecast_end_dt.strftime("%Y-%m-%d"), prod_day_nums, special_dates)
+                        cal_df = pd.concat([cal_df, cal_ext[cal_ext["date"] > cal_df["date"].max()]], ignore_index=True)
+                        delete_calendar(pred_company)
+                        import_calendar_from_df(cal_df, pred_company, "weekly_rule")
+                        st.session_state.calendar_df = cal_df
+                        st.success(f"✅ 已生成 {len(cal_df)} 天排班日历")
+                        st.rerun()
             else:
-                wx_raw = pd.read_excel(uploaded_wx)
-            wx_df = parse_weather_forecast_upload(wx_raw)
-            if wx_df is None or wx_df.empty:
-                st.error("无法解析天气预报，请检查格式。")
+                uploaded_cal = st.file_uploader("上传排班表", type=["csv", "xlsx"], key="cal_uploader")
+                if uploaded_cal is not None:
+                    cal_raw = pd.read_csv(uploaded_cal) if uploaded_cal.name.endswith(".csv") else pd.read_excel(uploaded_cal)
+                    cal_df = parse_calendar_upload(cal_raw)
+                    if cal_df.empty:
+                        st.error("无法解析排班表")
+                    else:
+                        delete_calendar(pred_company)
+                        import_calendar_from_df(cal_df, pred_company, "upload")
+                        st.session_state.calendar_df = cal_df
+                        st.success(f"✅ 已导入 {len(cal_df)} 天排班数据")
+                        st.rerun()
+            if cal_has_data:
+                st.caption(f"当前排班: {len(existing_cal)} 天")
+
+        with col_wx:
+            uploaded_wx = st.file_uploader(
+                "上传天气预报 (CSV/Excel)", type=["csv", "xlsx", "xls"], key="wx_forecast_uploader",
+            )
+            if uploaded_wx is not None:
+                wx_raw = pd.read_csv(uploaded_wx) if uploaded_wx.name.endswith(".csv") else pd.read_excel(uploaded_wx)
+                wx_df = parse_weather_forecast_upload(wx_raw)
+                if wx_df is None or wx_df.empty:
+                    st.error("无法解析天气预报")
+                else:
+                    st.session_state.weather_forecast_df = wx_df
+                    st.success(f"✅ 已加载 {len(wx_df)} 天天气预报")
+            if st.session_state.weather_forecast_df is not None and not st.session_state.weather_forecast_df.empty:
+                st.caption(f"当前预报: {len(st.session_state.weather_forecast_df)} 天")
             else:
-                st.session_state.weather_forecast_df = wx_df
-                st.success(f"✅ 已加载 {len(wx_df)} 天天气预报")
-        except Exception as e:
-            st.error(f"文件读取失败: {e}")
+                st.caption("不上传则无天气修正")
 
-    if st.session_state.weather_forecast_df is not None and not st.session_state.weather_forecast_df.empty:
-        with st.expander(f"📋 天气预报预览 ({len(st.session_state.weather_forecast_df)} 天)", expanded=False):
-            st.dataframe(st.session_state.weather_forecast_df, use_container_width=True, hide_index=True)
-    else:
-        st.caption("💡 不上传则使用历史均值预测（无天气修正）")
-
-    st.divider()
-
-    # ---- Step 4: 预测参数 ----
-    st.markdown("### ⚙️ Step 4: 预测参数")
-
-    col_p1, col_p2, col_p3 = st.columns(3)
+    # ---- 预测参数 + 运行 ----
+    col_p1, col_p2, col_p3 = st.columns([1, 1, 2])
     with col_p1:
-        forecast_horizon = st.slider(
-            "预测天数",
-            min_value=1,
-            max_value=DEFAULT_FORECAST_DAYS_LIMIT,
-            value=31,
-            step=1,
-        )
+        forecast_horizon = st.slider("预测天数", 1, DEFAULT_FORECAST_DAYS_LIMIT, 31, 1)
     with col_p2:
-        knn_k = st.slider(
-            "KNN 匹配数",
-            min_value=1,
-            max_value=10,
-            value=DEFAULT_KNN_K,
-            step=1,
-        )
+        knn_k = st.slider("KNN 匹配数", 1, 10, DEFAULT_KNN_K, 1)
     with col_p3:
+        st.write("")
         if st.button("🚀 运行预测", type="primary", use_container_width=True, key="run_forecast_btn"):
             with st.spinner(f"正在预测 {pred_company} 未来 {forecast_horizon} 天负荷..."):
                 df_load = query_load_all(pred_company)
                 df_hourly = prepare_load_data(df_load, pred_company)
-
                 cal_df = st.session_state.calendar_df
                 wx_df = st.session_state.weather_forecast_df
-
                 result = run_forecast(
                     company=pred_company,
                     df_hourly=df_hourly,
@@ -1238,9 +1155,9 @@ with tab5:
                     weather_df=wx_df if wx_df is not None and not wx_df.empty else None,
                     k=knn_k,
                 )
-
                 st.session_state.prediction_result = result
                 st.session_state.prediction_company = pred_company
+                st.session_state._df_load = df_load
             st.success("✅ 预测完成")
 
     st.divider()
@@ -1251,32 +1168,60 @@ with tab5:
         if "error" in result:
             st.error(result["error"])
         else:
-            daily_series = prepare_daily_series(prepare_load_data(query_load_all(pred_company), pred_company))
+            df_load = st.session_state.get("_df_load")
+            if df_load is None:
+                df_load = query_load_all(pred_company)
+            df_hourly = prepare_load_data(df_load, pred_company)
+            daily_series = prepare_daily_series(df_hourly)
 
             st.markdown("### 📊 预测结果")
 
-            # 概览指标
             forecast = result["daily_forecast"]
-            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-            with col_m1:
-                st.metric("预测日均负荷", f"{forecast.mean():.1f} MWh")
-            with col_m2:
-                st.metric("预测日峰荷均值", f"{pd.DataFrame(result['hourly_results']).groupby('date')['load_mw'].max().mean():.2f} MW")
-            with col_m3:
-                st.metric("历史日均负荷", f"{daily_series.mean():.1f} MWh")
-            with col_m4:
-                info = result.get("info", {})
-                st.metric("最优回看窗口", f"{info.get('best_window', '-')} 天")
+            hourly_df = pd.DataFrame(result["hourly_results"])
 
-            # 日总量图
+            # 回测验证：预测最后30天 vs 实际
+            hist_dates = set(str(d) for d in daily_series.index)
+            overlap = hourly_df[hourly_df["date"].apply(lambda d: str(d) in hist_dates)]
+            mape_val = None
+            if len(overlap) >= 24 * 7:
+                daily_pred = overlap.groupby("date")["load_mw"].sum()
+                daily_actual = {}
+                for d in daily_pred.index:
+                    d_str = str(d) if hasattr(d, "strftime") else d
+                    if d_str in hist_dates or pd.Timestamp(d).strftime("%Y-%m-%d") in hist_dates:
+                        key = pd.Timestamp(d).strftime("%Y-%m-%d")
+                        if key in daily_series.index:
+                            daily_actual[d] = daily_series[key]
+                if daily_actual:
+                    actual_vals = np.array(list(daily_actual.values()))
+                    pred_vals = np.array([daily_pred[d] for d in daily_actual.keys()])
+                    mape_val = float(np.mean(np.abs((actual_vals - pred_vals) / (actual_vals + 1e-6))) * 100)
+                    mae_val = float(np.mean(np.abs(actual_vals - pred_vals)))
+
+            info = result.get("info", {})
+            cols_metrics = []
+            cols_metrics.append(("预测日均负荷", f"{forecast.mean():.1f} MWh"))
+            cols_metrics.append(("历史日均负荷", f"{daily_series.mean():.1f} MWh"))
+            cols_metrics.append(("最优回看窗口", f"{info.get('best_window', '-')} 天"))
+            if mape_val is not None:
+                cols_metrics.append((
+                    "回测 MAPE",
+                    f"{mape_val:.1f}%",
+                    "normal" if mape_val < 10 else "off" if mape_val < 20 else "inverse"
+                ))
+            else:
+                cols_metrics.append(("回测残差 σ", f"{info.get('residual_std', '-'):.1f} MWh" if isinstance(info.get('residual_std'), (int, float)) else "-"))
+
+            metric_cols = st.columns(len(cols_metrics))
+            for i, (label, value, *rest) in enumerate(cols_metrics):
+                with metric_cols[i]:
+                    delta_color = rest[0] if rest else "normal"
+                    st.metric(label, value)
+
+            cal_df = st.session_state.calendar_df
+
             st.plotly_chart(
-                plot_daily_forecast(
-                    daily_series,
-                    result["daily_forecast"],
-                    result["daily_lower"],
-                    result["daily_upper"],
-                    pred_company,
-                ),
+                plot_daily_forecast(daily_series, forecast, result["daily_lower"], result["daily_upper"], pred_company),
                 use_container_width=True,
             )
 
@@ -1287,7 +1232,6 @@ with tab5:
                     use_container_width=True,
                 )
             with col_c2:
-                cal_df = st.session_state.calendar_df
                 st.plotly_chart(
                     plot_weekday_vs_rest(
                         result["hourly_results"],
@@ -1298,11 +1242,7 @@ with tab5:
                 )
 
             st.plotly_chart(
-                plot_template_matches(
-                    result["hourly_results"],
-                    prepare_load_data(query_load_all(pred_company), pred_company),
-                    pred_company,
-                ),
+                plot_template_matches(result["hourly_results"], df_hourly, pred_company),
                 use_container_width=True,
             )
 

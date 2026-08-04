@@ -17,3 +17,14 @@ DEFAULT_MIN_WINDOW = 14
 
 WEATHER_CORRECTION_WINDOWS = [14, 21, 28, 42, 56]
 REG_STRENGTHS = [0.0, 0.2, 0.4, 0.6]
+
+WEATHER_CORRECTION_PARAMS = {
+    "hot_temp_threshold": 35,
+    "hot_temp_factor": 1.03,
+    "cold_temp_threshold": 5,
+    "cold_temp_factor": 1.02,
+    "heavy_rain_threshold": 10,
+    "heavy_rain_factor": 0.98,
+    "solar_max_reduction": 0.05,
+    "solar_reference_rad": 5000.0,
+}
