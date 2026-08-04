@@ -1024,7 +1024,7 @@ with tab5:
     st.caption("基于历史负荷 + 排班日历 + 天气预报，预测未来逐时负荷")
 
     # ---- 数据配置区（紧凑布局） ----
-    col_c1, col_c2 = st.columns([1, 3])
+    col_c1, col_c2, col_c3 = st.columns([2, 3, 1])
     with col_c1:
         pred_company = st.selectbox(
             "选择公司",
@@ -1035,28 +1035,65 @@ with tab5:
         load_has = has_load_data(pred_company)
         load_start, load_end = query_load_date_range(pred_company)
         if load_has:
-            st.success(f"✅ {pred_company} 已有数据: {load_start} ~ {load_end}")
+            st.success(f"✅ {pred_company} 有数据: {load_start} ~ {load_end}")
         else:
-            st.info(f"💡 {pred_company} 暂无历史负荷数据，请上传")
+            st.info(f"💡 {pred_company} 暂无历史负荷数据，请在右侧导入")
+    with col_c3:
+        st.write("")
+        if st.button("📂 导入数据", use_container_width=True, key="toggle_import"):
+            st.session_state._show_import = not st.session_state.get("_show_import", False)
 
-    if not load_has:
-        uploaded_load = st.file_uploader(
-            f"上传 {pred_company} 历史负荷文件",
-            type=["csv", "xlsx", "xls"],
-            key="pred_load_uploader",
-        )
-        if uploaded_load is not None:
-            from src.utils.csv_parser import parse_load_history_upload
-            file_bytes = uploaded_load.getvalue()
-            load_hist_df, error_msg = parse_load_history_upload(file_bytes, uploaded_load.name)
-            if error_msg:
-                st.error(error_msg)
-            elif load_hist_df is not None and not load_hist_df.empty:
-                load_hist_df["company"] = pred_company
-                import_load_from_df(load_hist_df, uploaded_load.name, pred_company)
-                st.success(f"✅ 已导入 {pred_company} {len(load_hist_df)} 条负荷记录")
-                st.rerun()
-        st.stop()
+    if st.session_state.get("_show_import", False) or not load_has:
+        with st.expander("📂 数据导入", expanded=not load_has):
+            st.caption("支持: Excel (.xlsx) / CSV 宽表(日期+24时) / CSV 长表(datetime+load_mw)")
+
+            uploaded_load = st.file_uploader(
+                f"上传 {pred_company} 负荷文件",
+                type=["csv", "xlsx", "xls"],
+                key="pred_load_uploader",
+            )
+
+            if uploaded_load is not None:
+                from src.utils.csv_parser import parse_load_history_upload
+                file_bytes = uploaded_load.getvalue()
+                load_hist_df, error_msg = parse_load_history_upload(file_bytes, uploaded_load.name)
+                if error_msg:
+                    st.error(error_msg)
+                elif load_hist_df is not None and not load_hist_df.empty:
+                    load_hist_df["company"] = pred_company
+                    n_imported = import_load_from_df(load_hist_df, uploaded_load.name, pred_company)
+                    st.success(f"✅ 已导入 {pred_company} {n_imported} 条负荷记录")
+                    st.session_state._show_import = False
+                    st.rerun()
+
+            # 批量导入三家公司
+            st.divider()
+            st.caption("或分别上传各公司数据：")
+            batch_cols = st.columns(3)
+            for i, company in enumerate(PREDICTION_COMPANIES):
+                with batch_cols[i]:
+                    co_has = has_load_data(company)
+                    co_start, co_end = query_load_date_range(company) if co_has else (None, None)
+                    st.caption(f"{'✅' if co_has else '⬜'} {company}" + (f": {co_start}~{co_end}" if co_has else " 无数据"))
+                    co_file = st.file_uploader(
+                        company, type=["csv", "xlsx", "xls"],
+                        key=f"batch_load_{company}",
+                        label_visibility="collapsed",
+                    )
+                    if co_file is not None:
+                        co_bytes = co_file.getvalue()
+                        co_df, co_err = parse_load_history_upload(co_bytes, co_file.name)
+                        if co_err:
+                            st.error(co_err)
+                        elif co_df is not None and not co_df.empty:
+                            co_df["company"] = company
+                            import_load_from_df(co_df, co_file.name, company)
+                            st.success(f"✅ {company}")
+                            st.rerun()
+
+        if not load_has:
+            st.info("👆 请先导入历史负荷数据")
+            st.stop()
 
     existing_cal = get_calendar(pred_company)
     cal_has_data = not existing_cal.empty
