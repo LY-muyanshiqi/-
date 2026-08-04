@@ -247,8 +247,9 @@ if "weather_forecast_df" not in st.session_state:
     st.session_state.weather_forecast_df = None
 
 # ============================================================
-# 数据获取（SQLite 优先，缺失时拉取 API）
+# 数据获取（SQLite 优先，缺失时拉取 API + Streamlit 内存缓存）
 # ============================================================
+@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
 def load_cached_or_fetch(location_key: str, history_days: int, forecast_days: int) -> dict:
     """优先从 SQLite 读取缓存，缺失时才拉取 API。"""
     loc = LOCATIONS[location_key]
