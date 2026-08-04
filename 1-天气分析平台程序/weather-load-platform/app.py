@@ -216,6 +216,25 @@ def _seed_weather_db():
 
 _seed_weather_db()
 
+
+def _build_hourly_export(company: str) -> BytesIO:
+    """导出指定公司的全部历史逐时负荷为 Excel。"""
+    from io import BytesIO
+    df = query_load_all(company)
+    if df.empty:
+        df = pd.DataFrame({"提示": ["暂无数据"]})
+    else:
+        df = df.rename(columns={
+            "datetime": "时间", "load_mw": "负荷_MW",
+            "weekday": "星期", "daily_total": "日总_MWh",
+        })
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="逐时负荷", index=False)
+    output.seek(0)
+    return output
+
+
 # Session State 初始化
 if "load_df" not in st.session_state:
     st.session_state.load_df = None
@@ -1038,6 +1057,17 @@ with tab5:
             st.success(f"✅ {pred_company} 有数据: {load_start} ~ {load_end}")
         else:
             st.info(f"💡 {pred_company} 暂无历史负荷数据，请在右侧导入")
+
+    if load_has:
+        col_b1, col_b2 = st.columns([3, 1])
+        with col_b2:
+            st.download_button(
+                label=f"📥 导出 {pred_company} 逐时数据",
+                data=_build_hourly_export(pred_company),
+                file_name=f"{pred_company}_逐时负荷_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
     with col_c3:
         st.write("")
         if st.button("📂 导入数据", use_container_width=True, key="toggle_import"):
