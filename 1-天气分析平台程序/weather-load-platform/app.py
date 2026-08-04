@@ -1154,8 +1154,36 @@ with tab5:
                 st.caption(f"当前排班: {len(existing_cal)} 天")
 
         with col_wx:
+            # 模板下载
+            from io import BytesIO
+            template_buffer = BytesIO()
+            wx_template = pd.DataFrame({
+                "date": pd.date_range(
+                    datetime.now(), periods=31, freq="D"
+                ).strftime("%Y-%m-%d"),
+                "tmax": [32.0] * 31,
+                "tmin": [25.0] * 31,
+                "humidity_avg": [75.0] * 31,
+                "precip_sum": [0.0] * 31,
+                "rad_sum": [5000.0] * 31,
+            })
+            wx_template.loc[5:7, "precip_sum"] = 15.0
+            wx_template.loc[5:7, "rad_sum"] = 2000.0
+            with pd.ExcelWriter(template_buffer, engine="openpyxl") as writer:
+                wx_template.to_excel(writer, sheet_name="天气预报", index=False)
+            template_buffer.seek(0)
+            st.download_button(
+                label="📥 下载天气模板",
+                data=template_buffer,
+                file_name="天气预报模板.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+
+            st.caption("填完模板后在此上传：")
             uploaded_wx = st.file_uploader(
-                "上传天气预报 (CSV/Excel)", type=["csv", "xlsx", "xls"], key="wx_forecast_uploader",
+                "上传天气预报 (Excel/CSV)", type=["csv", "xlsx", "xls"], key="wx_forecast_uploader",
+                label_visibility="collapsed",
             )
             if uploaded_wx is not None:
                 wx_raw = pd.read_csv(uploaded_wx) if uploaded_wx.name.endswith(".csv") else pd.read_excel(uploaded_wx)
