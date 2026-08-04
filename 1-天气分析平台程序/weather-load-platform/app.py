@@ -169,47 +169,46 @@ def _seed_weather_db():
 
         _conn = sqlite3.connect(_db_path)
         _conn.execute("DELETE FROM weather_hourly")
-        _conn.execute("UPDATE weather_hourly SET datetime = REPLACE(datetime, '+08:00', '') WHERE datetime LIKE '%+08:00'")
 
-        # 聚合: (date, hour) → {temperature_2m, precipitation, ...}
-        from collections import defaultdict
-        records = defaultdict(dict)
-        for _, row in df.iterrows():
-            date_val = str(row["date"])[:10]
-            element = str(row["element"])
-            col_name = element_map.get(element)
-            if col_name is None:
-                continue
-            for h in range(24):
-                val = row[h]
-                if pd.isna(val):
-                    continue
-                dt = f"{date_val}T{h:02d}:00:00"
-                records[dt][col_name] = float(val)
+        # 用 melt 向量化替代 iterrows 逐行聚合
+        df["element_en"] = df["element"].map(element_map)
+        df = df.dropna(subset=["element_en"])
+        df["date"] = df["date"].astype(str).str[:10]
 
+        id_vars = ["date", "element_en"]
+        value_vars = list(range(24))
+        melted = df.melt(id_vars=id_vars, value_vars=value_vars, var_name="hour", value_name="value")
+        melted = melted.dropna(subset=["value"])
+        melted["datetime"] = melted["date"] + "T" + melted["hour"].astype(str).str.zfill(2) + ":00:00"
+
+        pivoted = melted.pivot_table(
+            index=["date", "hour", "datetime"],
+            columns="element_en",
+            values="value",
+            aggfunc="first",
+        ).reset_index()
+
+        now = pd.Timestamp.now().isoformat()
         cols = ["location_id", "datetime", "data_type", "source",
                 "temperature_2m", "precipitation", "wind_speed_10m",
                 "wind_direction_10m", "cloud_cover", "shortwave_radiation", "fetched_at"]
         phs = ",".join(["?"] * len(cols))
         sql = f"INSERT OR REPLACE INTO weather_hourly ({','.join(cols)}) VALUES ({phs})"
-        now = pd.Timestamp.now().isoformat()
-        inserted = 0
-        for dt, vals in records.items():
-            row = [
-                "zhongshan", dt, "historical", "seed",
-                vals.get("temperature_2m"),
-                vals.get("precipitation"),
-                vals.get("wind_speed_10m"),
-                vals.get("wind_direction_10m"),
-                vals.get("cloud_cover"),
-                vals.get("shortwave_radiation"),
+
+        rows = []
+        for _, r in pivoted.iterrows():
+            rows.append((
+                "zhongshan", r["datetime"], "historical", "seed",
+                r.get("temperature_2m"),
+                r.get("precipitation"),
+                r.get("wind_speed_10m"),
+                r.get("wind_direction_10m"),
+                r.get("cloud_cover"),
+                r.get("shortwave_radiation"),
                 now,
-            ]
-            try:
-                _conn.execute(sql, row)
-                inserted += 1
-            except Exception:
-                pass
+            ))
+
+        _conn.executemany(sql, rows)
         _conn.commit()
         _conn.close()
     except Exception:
