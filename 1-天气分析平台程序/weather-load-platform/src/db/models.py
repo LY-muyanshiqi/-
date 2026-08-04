@@ -12,10 +12,12 @@ DB_PATH = os.path.join(DB_DIR, "weather.db")
 
 
 def get_connection() -> sqlite3.Connection:
-    """获取 SQLite 连接（WAL 模式，避免锁冲突）。"""
+    """获取 SQLite 连接（WAL 模式，优化写入性能）。"""
     os.makedirs(DB_DIR, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA cache_size=-8000")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 

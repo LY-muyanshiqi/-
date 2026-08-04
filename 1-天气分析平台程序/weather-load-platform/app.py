@@ -247,63 +247,50 @@ if "weather_forecast_df" not in st.session_state:
     st.session_state.weather_forecast_df = None
 
 # ============================================================
-# 数据获取（带缓存）
+# 数据获取（SQLite 优先，缺失时拉取 API）
 # ============================================================
-@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner="正在获取天气数据...")
-def fetch_all_weather_data(
-    location_key: str,
-    history_days: int,
-    forecast_days: int,
-) -> dict:
-    """
-    获取指定地点的历史+预报数据，写入 SQLite 后返回。
-
-    返回
-    ----
-    dict: {"historical": DataFrame, "forecast": DataFrame, "status": DataSourceStatus}
-    """
-    status = DataSourceStatus()
+def load_cached_or_fetch(location_key: str, history_days: int, forecast_days: int) -> dict:
+    """优先从 SQLite 读取缓存，缺失时才拉取 API。"""
     loc = LOCATIONS[location_key]
+    status = DataSourceStatus()
 
-    result = {"historical": pd.DataFrame(), "forecast": pd.DataFrame(), "status": status}
-
-    forecast_end = (datetime.now() + timedelta(days=forecast_days)).strftime("%Y-%m-%d")
-    forecast_start = datetime.now().strftime("%Y-%m-%d")
+    now = datetime.now()
+    hist_start = (now - timedelta(days=history_days)).strftime("%Y-%m-%d")
+    hist_end = now.strftime("%Y-%m-%d")
+    forecast_end = (now + timedelta(days=forecast_days)).strftime("%Y-%m-%d")
+    forecast_start = now.strftime("%Y-%m-%d")
 
     if loc.get("is_aggregate"):
-        # 广东省平均
-        result["historical"] = fetch_guangdong_average("historical", status, history_days, forecast_days)
-        result["forecast"] = fetch_guangdong_average("forecast", status, history_days, forecast_days)
+        from src.aggregation.province_avg import fetch_guangdong_average
+        historical = fetch_guangdong_average("historical", status, history_days, forecast_days)
+        forecast = fetch_guangdong_average("forecast", status, history_days, forecast_days)
     else:
-        # 单点城市
-        hist_start, hist_end = date_range_dates(history_days, 0)
-        result["historical"] = fetch_historical_safe(
-            loc["latitude"], loc["longitude"], location_key, hist_start, hist_end, status,
-        )
-        result["forecast"] = fetch_forecast_safe(
-            loc["latitude"], loc["longitude"], location_key, forecast_days, status,
-        )
+        historical = query_weather_data([location_key], hist_start, hist_end, ["historical"])
+        forecast = query_weather_data([location_key], forecast_start, forecast_end, ["forecast"])
 
-    # 广东省平均已在 fetch_guangdong_average 内部逐城 convert_units
-    # 单点城市需要在此处调用 convert_units
-    if not loc.get("is_aggregate"):
-        if not result["historical"].empty:
-            result["historical"] = convert_units(result["historical"])
-        if not result["forecast"].empty:
-            result["forecast"] = convert_units(result["forecast"])
+        expected_hist_hours = history_days * 24
+        expected_forecast_hours = forecast_days * 24
 
-    # 写入数据库
-    if not result["historical"].empty:
-        insert_weather_data(result["historical"])
-    if not result["forecast"].empty:
-        insert_weather_data(result["forecast"])
+        if len(historical) < expected_hist_hours * 0.8:
+            historical = fetch_historical_safe(
+                loc["latitude"], loc["longitude"], location_key, hist_start, hist_end, status,
+            )
+            if not historical.empty:
+                insert_weather_data(historical)
 
-    return result
+        if len(forecast) < expected_forecast_hours * 0.8:
+            forecast = fetch_forecast_safe(
+                loc["latitude"], loc["longitude"], location_key, forecast_days, status,
+            )
+            if not forecast.empty:
+                insert_weather_data(forecast)
 
+        if not historical.empty:
+            historical = convert_units(historical)
+        if not forecast.empty:
+            forecast = convert_units(forecast)
 
-def load_cached_or_fetch(location_key: str, history_days: int, forecast_days: int) -> dict:
-    """优先从 SQLite 读取，缓存过期则拉取 API。"""
-    return fetch_all_weather_data(location_key, history_days, forecast_days)
+    return {"historical": historical, "forecast": forecast, "status": status}
 
 
 # ============================================================
