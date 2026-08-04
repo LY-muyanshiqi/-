@@ -1121,112 +1121,110 @@ with tab5:
     if not existing_cal.empty:
         st.session_state.calendar_df = existing_cal
 
-    with st.expander("📅 排班日历 + 🌤️ 天气预报", expanded=False):
-        col_cal, col_wx = st.columns(2)
-        with col_cal:
-            cal_mode = st.radio(
-                "排班模式", options=["weekly_rule", "upload"],
-                format_func=lambda x: "周规律" if x == "weekly_rule" else "上传排班表",
-                horizontal=True, key="cal_mode",
+    with st.expander("📅 排班日历", expanded=False):
+        cal_mode = st.radio(
+            "排班模式", options=["weekly_rule", "upload"],
+            format_func=lambda x: "周规律" if x == "weekly_rule" else "上传排班表",
+            horizontal=True, key="cal_mode",
+        )
+        if cal_mode == "weekly_rule":
+            prod_days = st.multiselect(
+                "每周生产日",
+                options=[(0, "周一"), (1, "周二"), (2, "周三"), (3, "周四"), (4, "周五"), (5, "周六"), (6, "周日")],
+                default=DEFAULT_PRODUCTION_DAYS, format_func=lambda x: x[1], key="prod_days_select",
             )
-            if cal_mode == "weekly_rule":
-                prod_days = st.multiselect(
-                    "每周生产日",
-                    options=[(0, "周一"), (1, "周二"), (2, "周三"), (3, "周四"), (4, "周五"), (5, "周六"), (6, "周日")],
-                    default=DEFAULT_PRODUCTION_DAYS, format_func=lambda x: x[1], key="prod_days_select",
-                )
-                special_dates_input = st.text_area(
-                    "特殊日（YYYY-MM-DD,类型）", placeholder="2026-10-01,holiday",
-                    height=68, key="special_dates_input",
-                )
-                if st.button("🔄 生成排班日历", key="gen_calendar"):
-                    prod_day_nums = [d[0] for d in prod_days]
-                    special_dates = {}
-                    if special_dates_input.strip():
-                        for line in special_dates_input.strip().split("\n"):
-                            parts = [p.strip() for p in line.split(",")]
-                            if len(parts) >= 2:
-                                special_dates[parts[0]] = parts[1]
-                    if load_start and load_end:
-                        cal_df = generate_calendar_from_rule(load_start, load_end, prod_day_nums, special_dates)
-                        forecast_end_dt = datetime.strptime(load_end, "%Y-%m-%d") + timedelta(days=DEFAULT_FORECAST_DAYS_LIMIT)
-                        cal_ext = generate_calendar_from_rule(load_end, forecast_end_dt.strftime("%Y-%m-%d"), prod_day_nums, special_dates)
-                        cal_df = pd.concat([cal_df, cal_ext[cal_ext["date"] > cal_df["date"].max()]], ignore_index=True)
-                        delete_calendar(pred_company)
-                        import_calendar_from_df(cal_df, pred_company, "weekly_rule")
-                        st.session_state.calendar_df = cal_df
-                        st.success(f"✅ 已生成 {len(cal_df)} 天排班日历")
-                        st.rerun()
-            else:
-                uploaded_cal = st.file_uploader("上传排班表", type=["csv", "xlsx"], key="cal_uploader")
-                if uploaded_cal is not None:
-                    cal_raw = pd.read_csv(uploaded_cal) if uploaded_cal.name.endswith(".csv") else pd.read_excel(uploaded_cal)
-                    cal_df = parse_calendar_upload(cal_raw)
-                    if cal_df.empty:
-                        st.error("无法解析排班表")
-                    else:
-                        delete_calendar(pred_company)
-                        import_calendar_from_df(cal_df, pred_company, "upload")
-                        st.session_state.calendar_df = cal_df
-                        st.success(f"✅ 已导入 {len(cal_df)} 天排班数据")
-                        st.rerun()
-            if not existing_cal.empty:
-                st.caption(f"当前排班: {len(existing_cal)} 天")
-
-        with col_wx:
-            st.caption("在表格中直接填写天气预报数据：")
-            wx_has = False
-            if "weather_editor_df" not in st.session_state:
-                dates = pd.date_range(datetime.now(), periods=7, freq="D")
-                st.session_state.weather_editor_df = pd.DataFrame({
-                    "date": dates.strftime("%Y-%m-%d"),
-                    "tmax": [32.0] * 7,
-                    "tmin": [25.0] * 7,
-                    "humidity_avg": [75.0] * 7,
-                    "precip_sum": [0.0] * 7,
-                    "rad_sum": [5000.0] * 7,
-                })
-            wx_days = st.slider("预报天数", 1, 31, 7, 1, key="wx_days")
-            current_df = st.session_state.weather_editor_df
-            if len(current_df) < wx_days:
-                extra = wx_days - len(current_df)
-                last_date = pd.Timestamp(current_df["date"].iloc[-1])
-                new_rows = pd.DataFrame({
-                    "date": pd.date_range(last_date + pd.Timedelta(days=1), periods=extra, freq="D").strftime("%Y-%m-%d"),
-                    "tmax": [current_df["tmax"].iloc[-1]] * extra,
-                    "tmin": [current_df["tmin"].iloc[-1]] * extra,
-                    "humidity_avg": [current_df["humidity_avg"].iloc[-1]] * extra,
-                    "precip_sum": [0.0] * extra,
-                    "rad_sum": [current_df["rad_sum"].iloc[-1]] * extra,
-                })
-                current_df = pd.concat([current_df, new_rows], ignore_index=True)
-            elif len(current_df) > wx_days:
-                current_df = current_df.head(wx_days)
-
-            edited = st.data_editor(
-                current_df,
-                column_config={
-                    "date": st.column_config.TextColumn("日期", disabled=True),
-                    "tmax": st.column_config.NumberColumn("最高温 °C", min_value=-20.0, max_value=50.0, step=0.5, format="%.1f"),
-                    "tmin": st.column_config.NumberColumn("最低温 °C", min_value=-20.0, max_value=50.0, step=0.5, format="%.1f"),
-                    "humidity_avg": st.column_config.NumberColumn("湿度 %", min_value=0.0, max_value=100.0, step=1.0, format="%.0f"),
-                    "precip_sum": st.column_config.NumberColumn("降水 mm", min_value=0.0, max_value=500.0, step=1.0, format="%.1f"),
-                    "rad_sum": st.column_config.NumberColumn("辐射 W/m²·d", min_value=0.0, max_value=15000.0, step=100.0, format="%.0f"),
-                },
-                use_container_width=True,
-                num_rows="fixed",
-                height=250,
-                key="weather_editor",
+            special_dates_input = st.text_area(
+                "特殊日（YYYY-MM-DD,类型）", placeholder="2026-10-01,holiday",
+                height=68, key="special_dates_input",
             )
-            st.session_state.weather_editor_df = edited
+            if st.button("🔄 生成排班日历", key="gen_calendar"):
+                prod_day_nums = [d[0] for d in prod_days]
+                special_dates = {}
+                if special_dates_input.strip():
+                    for line in special_dates_input.strip().split("\n"):
+                        parts = [p.strip() for p in line.split(",")]
+                        if len(parts) >= 2:
+                            special_dates[parts[0]] = parts[1]
+                if load_start and load_end:
+                    cal_df = generate_calendar_from_rule(load_start, load_end, prod_day_nums, special_dates)
+                    forecast_end_dt = datetime.strptime(load_end, "%Y-%m-%d") + timedelta(days=DEFAULT_FORECAST_DAYS_LIMIT)
+                    cal_ext = generate_calendar_from_rule(load_end, forecast_end_dt.strftime("%Y-%m-%d"), prod_day_nums, special_dates)
+                    cal_df = pd.concat([cal_df, cal_ext[cal_ext["date"] > cal_df["date"].max()]], ignore_index=True)
+                    delete_calendar(pred_company)
+                    import_calendar_from_df(cal_df, pred_company, "weekly_rule")
+                    st.session_state.calendar_df = cal_df
+                    st.success(f"✅ 已生成 {len(cal_df)} 天排班日历")
+                    st.rerun()
+        else:
+            uploaded_cal = st.file_uploader("上传排班表", type=["csv", "xlsx"], key="cal_uploader")
+            if uploaded_cal is not None:
+                cal_raw = pd.read_csv(uploaded_cal) if uploaded_cal.name.endswith(".csv") else pd.read_excel(uploaded_cal)
+                cal_df = parse_calendar_upload(cal_raw)
+                if cal_df.empty:
+                    st.error("无法解析排班表")
+                else:
+                    delete_calendar(pred_company)
+                    import_calendar_from_df(cal_df, pred_company, "upload")
+                    st.session_state.calendar_df = cal_df
+                    st.success(f"✅ 已导入 {len(cal_df)} 天排班数据")
+                    st.rerun()
+        if not existing_cal.empty:
+            st.caption(f"当前排班: {len(existing_cal)} 天")
 
-            if st.button("✅ 确认天气数据", use_container_width=True, key="confirm_wx"):
-                st.session_state.weather_forecast_df = edited.rename(columns={"date": "date"})
-                st.success(f"✅ 已保存 {len(edited)} 天天气预报")
-                st.rerun()
+    with st.expander("🌤️ 天气预报", expanded=False):
+        st.caption("在表格中直接填写天气预报数据：")
+        wx_has = False
+        if "weather_editor_df" not in st.session_state:
+            dates = pd.date_range(datetime.now(), periods=7, freq="D")
+            st.session_state.weather_editor_df = pd.DataFrame({
+                "date": dates.strftime("%Y-%m-%d"),
+                "tmax": [32.0] * 7,
+                "tmin": [25.0] * 7,
+                "humidity_avg": [75.0] * 7,
+                "precip_sum": [0.0] * 7,
+                "rad_sum": [5000.0] * 7,
+            })
+        wx_days = st.slider("预报天数", 1, 31, 7, 1, key="wx_days")
+        current_df = st.session_state.weather_editor_df
+        if len(current_df) < wx_days:
+            extra = wx_days - len(current_df)
+            last_date = pd.Timestamp(current_df["date"].iloc[-1])
+            new_rows = pd.DataFrame({
+                "date": pd.date_range(last_date + pd.Timedelta(days=1), periods=extra, freq="D").strftime("%Y-%m-%d"),
+                "tmax": [current_df["tmax"].iloc[-1]] * extra,
+                "tmin": [current_df["tmin"].iloc[-1]] * extra,
+                "humidity_avg": [current_df["humidity_avg"].iloc[-1]] * extra,
+                "precip_sum": [0.0] * extra,
+                "rad_sum": [current_df["rad_sum"].iloc[-1]] * extra,
+            })
+            current_df = pd.concat([current_df, new_rows], ignore_index=True)
+        elif len(current_df) > wx_days:
+            current_df = current_df.head(wx_days)
 
-            wx_has = st.session_state.weather_forecast_df is not None and not st.session_state.weather_forecast_df.empty
-            st.caption(f"已保存: {len(st.session_state.weather_forecast_df)} 天" if wx_has else "✏️ 填完点「确认天气数据」即可生效")
+        edited = st.data_editor(
+            current_df,
+            column_config={
+                "date": st.column_config.TextColumn("日期", disabled=True),
+                "tmax": st.column_config.NumberColumn("最高温 °C", min_value=-20.0, max_value=50.0, step=0.5, format="%.1f"),
+                "tmin": st.column_config.NumberColumn("最低温 °C", min_value=-20.0, max_value=50.0, step=0.5, format="%.1f"),
+                "humidity_avg": st.column_config.NumberColumn("湿度 %", min_value=0.0, max_value=100.0, step=1.0, format="%.0f"),
+                "precip_sum": st.column_config.NumberColumn("降水 mm", min_value=0.0, max_value=500.0, step=1.0, format="%.1f"),
+                "rad_sum": st.column_config.NumberColumn("辐射 W/m²·d", min_value=0.0, max_value=15000.0, step=100.0, format="%.0f"),
+            },
+            use_container_width=True,
+            num_rows="fixed",
+            height=250,
+            key="weather_editor",
+        )
+        st.session_state.weather_editor_df = edited
+
+        if st.button("✅ 确认天气数据", use_container_width=True, key="confirm_wx"):
+            st.session_state.weather_forecast_df = edited.rename(columns={"date": "date"})
+            st.success(f"✅ 已保存 {len(edited)} 天天气预报")
+            st.rerun()
+
+        wx_has = st.session_state.weather_forecast_df is not None and not st.session_state.weather_forecast_df.empty
+        st.caption(f"已保存: {len(st.session_state.weather_forecast_df)} 天" if wx_has else "✏️ 填完点「确认天气数据」即可生效")
 
     # ---- 预测参数 + 运行 ----
     col_p1, col_p2, col_p3 = st.columns([1, 1, 2])
