@@ -1337,6 +1337,7 @@ with tab5:
 
             with st.expander("📋 预测数据表 + 导出", expanded=False):
                 st.dataframe(daily_report, use_container_width=True, height=250, hide_index=True)
+                from io import BytesIO
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine="openpyxl") as writer:
                     daily_report.to_excel(writer, sheet_name="日汇总", index=False)
